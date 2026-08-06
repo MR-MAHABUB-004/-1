@@ -1,0 +1,29 @@
+{
+  "botName": "MAHABUB-BOT",
+  "prefix": "/",
+  "language": "en",
+  "adminBot": [
+    "7406650400"
+  ],
+  "botToken": "8665138433:AAH3Ncv-is_PvEN6ta6SvRUXNpRML08CQX8",
+  "mongoUri": "mongodb+srv://mahabub:0000@cluster0.wg033zv.mongodb.net/?appName=Cluster0",
+  "dbName": "TeleBot",
+  "webhookUrl": "",
+  "useWebhook": false,
+  "port": 24736,
+  "api": "https://mahabub-apis.fun",
+  "cooldownDefault": 3,
+  "autoRestart": false,
+  "messageLogging": false,
+  "blackListActive": false,
+  "whiteListMode": {
+    "enabled": false,
+    "allowedChatIds": [
+      "7406650400"
+    ]
+  },
+  "blackList": {
+    "users": [],
+    "chats": []
+  }
+}
