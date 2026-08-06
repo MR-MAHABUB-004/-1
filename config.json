@@ -1,22 +1,24 @@
 {
-  "botName": "MAHABUB-BOT",
+  "botName": "Ꭺͷнꫝ Ꭺɪ Ꭺѕѕɪѕᴛᴀɴᴛ",
   "prefix": "/",
   "language": "en",
   "adminBot": [
-    "7406650400"
+    "740665040",
+    "8455433848"
   ],
-  "botToken": "8665138433:AAH3Ncv-is_PvEN6ta6SvRUXNpRML08CQX8",
+  "botToken": "8810303779:AAFobA_JOjC8-qul2Jv4CJDjwEm0gPh16gQ",
   "mongoUri": "mongodb+srv://mahabub:0000@cluster0.wg033zv.mongodb.net/?appName=Cluster0",
   "dbName": "TeleBot",
   "webhookUrl": "",
   "useWebhook": false,
-  "port": 24736,
+  "port": 20158,
   "api": "https://mahabub-apis.fun",
   "cooldownDefault": 3,
   "forceJoin": {
     "enabled": true,
-    "channelUsername": "@anhatayba1",
-    "channelUrl": "https://t.me/anhatayba1",
+    "channelUsername": "@anhatayba",
+    "channelUrl": "https://t.me/anhatayba",
+      "ownerUsername": "@anhataybaff",
     "cacheSeconds": 60
   },
   "autoRestart": false,
