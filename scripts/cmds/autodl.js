@@ -1,35 +1,38 @@
-"use strict";
-
-const fs    = require("fs");
-const path  = require("path");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 
-const TMP_DIR  = path.join(__dirname, "../tmp");
-const API_BASE = "https://mahabub-apis.fun";
+const API = "https://mahabub-aldl.vercel.app/api/dl";
+const TMP_DIR = path.join(__dirname, "tmp");
 
 module.exports = {
   config: {
-    name:      "auto",
-    aliases:   ["dl", "download"],
-    version:   "5.4",
-    author:    "MR᭄﹅ MAHABUB﹅ メꪜ",
+    name: "auto",
+    aliases: ["dl", "download"],
+    version: "6.0",
+    author: "MR᭄﹅ MAHABUB﹅ メꪜ",
     usePrefix: false,
-    role:      0,
-    category:  "media",
+    role: 0,
+    category: "media",
     countDown: 5,
-    description: { en: "Auto video downloader — just send any https link" },
-    guide:       { en: "Just send any video link and the bot will try to download it" },
+    description: {
+      en: "Auto video downloader"
+    },
+    guide: {
+      en: "Just send any supported video link."
+    }
   },
 
   langs: {
     en: {
-      downloaded: "✅ 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝗲𝗱!\n\n📌 Platform: %1\n🎬 Title: %2",
-      noLink:     "📥 Send any https video link and I'll download it for you 🎥",
-      noVideo:    "❌ No downloadable video found for that link.",
-    },
+      noLink: "📥 Send any supported video link.",
+      noVideo: "❌ No downloadable video found.",
+      downloaded:
+        "✅ Downloaded!\n\n📌 Platform: %1\n🎬 Title: %2\n👤 Author: %3"
+    }
   },
 
-  onStart: async function ({ message, getLang }) {
+  onStart: async ({ message, getLang }) => {
     return message.reply(getLang("noLink"));
   },
 
@@ -37,85 +40,63 @@ module.exports = {
     const text = event.body?.trim();
     if (!text) return;
 
-    const match = text.match(/(https?:\/\/[^\s]+)/);
+    const match = text.match(/https?:\/\/[^\s]+/i);
     if (!match) return;
 
-    const videoLink = match[0];
+    const url = match[0];
+
     await message.action("upload_video");
 
-    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    if (!fs.existsSync(TMP_DIR))
+      fs.mkdirSync(TMP_DIR, { recursive: true });
 
-    async function fetchInfo(retries = 3) {
-      for (let i = 1; i <= retries; i++) {
-        try {
-          const res = await axios.get(
-            `${API_BASE}/mahabub/dl?url=${encodeURIComponent(videoLink)}`,
-            { timeout: 15000 }
-          );
-          return res.data;
-        } catch (err) {
-          if (i === retries) throw err;
-          await wait(2000);
-        }
-      }
-    }
-
-    async function downloadFile(downloadURL, filePath, retries = 3) {
-      for (let i = 1; i <= retries; i++) {
-        try {
-          const res = await axios.get(downloadURL, {
-            responseType: "stream",
-            timeout: 60000,
-            headers: { "User-Agent": "Mozilla/5.0" },
-          });
-          await new Promise((resolve, reject) => {
-            const writer = fs.createWriteStream(filePath);
-            res.data.pipe(writer);
-            writer.on("finish", resolve);
-            writer.on("error", reject);
-          });
-          return;
-        } catch (err) {
-          if (i === retries) throw err;
-          await wait(2000);
-        }
-      }
-    }
-
-    function cleanup(filePath) {
-      try {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch {}
-    }
-
-    if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
     const filePath = path.join(TMP_DIR, `video_${Date.now()}.mp4`);
 
     try {
-      const data = await fetchInfo();
-      const { platform, title, hd, sd } = data;
-      const downloadURL = hd || sd;
+      const { data } = await axios.get(
+        `${API}?url=${encodeURIComponent(url)}`,
+        {
+          timeout: 20000
+        }
+      );
 
-      if (!downloadURL) {
+      if (
+        data.status !== "success" ||
+        !(data.video || data.hd || data.sd)
+      ) {
         return message.reply(getLang("noVideo"));
       }
 
-      await downloadFile(downloadURL, filePath);
+      const videoUrl = data.video || data.hd || data.sd;
 
-      // Wait for sendVideo to fully finish THEN delete — stream must be closed first
+      const res = await axios({
+        url: videoUrl,
+        method: "GET",
+        responseType: "stream",
+        timeout: 60000,
+        headers: {
+          "User-Agent": "Mozilla/5.0"
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(filePath);
+        res.data.pipe(writer);
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+      });
+
       await message.sendVideo(
         fs.createReadStream(filePath),
         getLang("downloaded")
-          .replace("%1", platform || "Unknown")
-          .replace("%2", title    || "No Title")
+          .replace("%1", data.platform || "Unknown")
+          .replace("%2", data.title || "No Title")
+          .replace("%3", data.author || "Unknown")
       );
 
-      // ✅ File fully uploaded — safe to delete now
-      cleanup(filePath);
-
-    } catch {
-      // Silent fail — cleanup on error too
-      cleanup(filePath);
+      fs.unlinkSync(filePath);
+    } catch (e) {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
-  },
+  }
 };
