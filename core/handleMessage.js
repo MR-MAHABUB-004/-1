@@ -16,6 +16,7 @@ const {
 } = require("./utils.js");
 const { threadsData, usersData, globalData } = require("./database.js");
 const config = require("../config.json");
+const { checkForceJoin, buildJoinPrompt, clearCache, isChannelMember, getForceJoinConfig } = require("./forceJoin.js");
 
 // ── COOLDOWN STORE ────────────────────────────────────────────────────────────
 const cooldowns = new Map();
@@ -165,6 +166,15 @@ async function handleMessage(bot, msg) {
 
     if (!pattern.test(text)) continue;
 
+    // ── Force-join gate — must be a member of the required channel ─────────
+    // (bot admins configured in adminBot always bypass this)
+    const joined = await checkForceJoin(bot, config, userId);
+    if (!joined) {
+      const prompt = buildJoinPrompt(config);
+      await message.reply(prompt.text, prompt.opts);
+      break;
+    }
+
     // Per-thread disabled commands
     const threadCfg    = await threadsData.get(chatId);
     const disabledCmds = threadCfg?.disabledCmds || [];
@@ -240,6 +250,29 @@ async function handleCallbackQuery(bot, query) {
     setPendingReply:   (cmdName, extra) => setPendingReply(chatId, userId, cmdName, extra),
     clearPendingReply: ()               => clearPendingReply(chatId, userId),
   };
+
+  // ── Force-join re-verify button ("✅ I've Joined") ──────────────────────────
+  if (data === "fj_verify") {
+    const fj = getForceJoinConfig(config);
+    const stillOk = fj.enabled && fj.channelUsername
+      ? await isChannelMember(bot, fj.channelUsername, userId)
+      : true;
+
+    if (stillOk) {
+      await bot.answerCallbackQuery(query.id, { text: "✅ You're verified! You can use the bot now." }).catch(() => {});
+      await bot.editMessageText(
+        "✅ *You can now use the bot!*\n\nSend any command to get started.",
+        { chat_id: chatId, message_id: message.message_id, parse_mode: "Markdown" }
+      ).catch(() => {});
+    } else {
+      clearCache(userId);
+      await bot.answerCallbackQuery(query.id, {
+        text: "❌ You haven't joined the channel yet. Please join first!",
+        show_alert: true,
+      }).catch(() => {});
+    }
+    return;
+  }
 
   const { eventCommands, commands } = global.GoatBot;
 
