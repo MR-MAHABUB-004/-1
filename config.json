@@ -13,6 +13,12 @@
   "port": 24736,
   "api": "https://mahabub-apis.fun",
   "cooldownDefault": 3,
+  "forceJoin": {
+    "enabled": true,
+    "channelUsername": "@anhatayba1",
+    "channelUrl": "https://t.me/anhatayba1",
+    "cacheSeconds": 60
+  },
   "autoRestart": false,
   "messageLogging": false,
   "blackListActive": false,
