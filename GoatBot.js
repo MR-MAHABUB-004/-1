@@ -63,6 +63,51 @@ if (config.useWebhook && config.webhookUrl) {
 global.GoatBot.bot = bot;
 global.bot         = bot;
 
+// ── SENT-MESSAGE TRACKER ─────────────────────────────────────────────────────
+// Telegram gives bots no way to list messages they've previously sent, so we
+// record message_ids ourselves (per chat) whenever the bot sends something.
+// Powers /clear (delete all bot messages in a chat) and /uns (unsend a
+// specific bot message you're replying to).
+global.sentMessages = new Map(); // chatId(string) -> [message_id, ...]
+
+const MAX_TRACKED_PER_CHAT = 300;
+
+function trackSent(chatId, msgId) {
+  if (!chatId || !msgId) return;
+  const key = String(chatId);
+  const arr = global.sentMessages.get(key) || [];
+  arr.push(msgId);
+  if (arr.length > MAX_TRACKED_PER_CHAT) arr.shift();
+  global.sentMessages.set(key, arr);
+}
+
+const TRACKED_SEND_METHODS = [
+  "sendMessage", "sendPhoto", "sendVideo",
+  "sendDocument", "sendAudio", "sendVoice",
+  "sendAnimation", "sendSticker",
+];
+
+for (const method of TRACKED_SEND_METHODS) {
+  if (typeof bot[method] !== "function") continue;
+  const original = bot[method].bind(bot);
+  bot[method] = async function(chatId, ...rest) {
+    const result = await original(chatId, ...rest);
+    if (result && result.message_id) trackSent(chatId, result.message_id);
+    return result;
+  };
+}
+
+if (typeof bot.sendMediaGroup === "function") {
+  const originalSendMediaGroup = bot.sendMediaGroup.bind(bot);
+  bot.sendMediaGroup = async function(chatId, media, opts) {
+    const result = await originalSendMediaGroup(chatId, media, opts);
+    if (Array.isArray(result)) {
+      result.forEach((m) => trackSent(chatId, m.message_id));
+    }
+    return result;
+  };
+}
+
 // ── HANDLERS ────────────────────────────────────────────────────────────────
 const {
   handleMessage,
@@ -94,12 +139,33 @@ bot.on("message", msg => {
 // ── BROADCAST ───────────────────────────────────────────────────────────────
 const { threadsData, usersData } = require("./core/database.js");
 
-global.broadcast = async function(text, opts = {}) {
+// global.broadcast accepts either:
+//   • a plain string (legacy / dashboard use — sends as text)
+//   • a payload object: { type: "text", text }
+//                        { type: "photo" | "video" | "document", fileId, caption }
+global.broadcast = async function(payload, opts = {}) {
   const all = Object.values(await threadsData.getAll());
   let sent = 0, failed = 0;
+
+  const job = typeof payload === "string" ? { type: "text", text: payload } : payload;
+
   for (const chat of all) {
     try {
-      await bot.sendMessage(chat.id, text, { parse_mode: "Markdown", ...opts });
+      if (job.type === "photo") {
+        await bot.sendPhoto(chat.id, job.fileId, {
+          caption: job.caption || "", parse_mode: "Markdown", ...opts,
+        });
+      } else if (job.type === "video") {
+        await bot.sendVideo(chat.id, job.fileId, {
+          caption: job.caption || "", parse_mode: "Markdown", ...opts,
+        });
+      } else if (job.type === "document") {
+        await bot.sendDocument(chat.id, job.fileId, {
+          caption: job.caption || "", parse_mode: "Markdown", ...opts,
+        });
+      } else {
+        await bot.sendMessage(chat.id, job.text, { parse_mode: "Markdown", ...opts });
+      }
       sent++;
       await new Promise(r => setTimeout(r, 50));
     } catch { failed++; }
