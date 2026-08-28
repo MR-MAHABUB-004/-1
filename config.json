@@ -15,7 +15,7 @@
   "api": "https://mahabub-apis.fun",
   "cooldownDefault": 3,
   "forceJoin": {
-    "enabled": true,
+    "enabled": false,
     "channelUsername": "@anhatayba",
     "channelUrl": "https://t.me/anhatayba",
       "ownerUsername": "@anhataybaff",
