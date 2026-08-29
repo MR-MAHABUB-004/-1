@@ -21,6 +21,7 @@ const path = require("path");
 const { promisify } = require("util");
 const stream = require("stream");
 const yts = require("yt-search");
+const songApi = require("../../API/song/song.js");
 
 const finished = promisify(stream.finished);
 
@@ -277,16 +278,12 @@ module.exports = {
       let audioUrl;
 
       try {
-        const apiUrl =
-          `http://51.68.34.78:20279/api/mp3?url=` +
-          encodeURIComponent(`https://youtu.be/${videoId}`);
+        const result = await songApi.getMp3(`https://youtu.be/${videoId}`);
 
-        const { data } = await axios.get(apiUrl, { timeout: 90000 });
-
-        if (!data || !data.success || !data.data || !data.data.download_url) {
-          throw new Error("No download_url");
+        if (!result || !result.success || !result.data || !result.data.download_url) {
+          throw new Error((result && result.error) || "No download_url");
         }
-        audioUrl = data.data.download_url;
+        audioUrl = result.data.download_url;
       } catch (error) {
         console.error("[SONG FETCH ERROR]", error.message);
 
