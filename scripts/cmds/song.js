@@ -3,15 +3,13 @@
 /**
  * scripts/cmds/song.js
  * ──────────────────────────────────────────────────────────────
- * Song search + download
- *   /song <name>  → shows matching results as buttons
- *   tap a button  → downloads and sends that track as audio
+ * Song search + direct download
+ *   /song <name>  → finds the best-matching track and sends the
+ *                   audio straight away — no results list, no
+ *                   buttons to tap.
  *
  * Search:   yt-search (npm)
  * Download: scripts/cmds/API/song/song.js (in-process module)
- *
- * Callback format:
- *   song:pick:<token>
  * ──────────────────────────────────────────────────────────────
  */
 
@@ -24,30 +22,6 @@ const yts = require("yt-search");
 const songApi = require("./API/song/song.js");
 
 const finished = promisify(stream.finished);
-
-// ---------------------------------------------------------------------------
-// Callback data cache (same short-token pattern as apk.js)
-// ---------------------------------------------------------------------------
-
-const cbCache = new Map(); // token -> { videoId, title, author, duration, thumbnail }
-
-function cacheData(payload) {
-  const token =
-    Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 8);
-
-  cbCache.set(token, payload);
-
-  if (cbCache.size > 500) {
-    const firstKey = cbCache.keys().next().value;
-    cbCache.delete(firstKey);
-  }
-
-  return token;
-}
-
-function getCached(token) {
-  return cbCache.get(token) || null;
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +42,7 @@ async function downloadFile(url, destPath) {
       url,
       method: "GET",
       responseType: "stream",
-      timeout: 120000,
+      timeout: 300000,
       maxRedirects: 5,
       headers: {
         "User-Agent":
@@ -89,6 +63,46 @@ async function downloadFile(url, destPath) {
   }
 }
 
+// Very light relevance scoring on top of yt-search's own ordering
+// (which is already relevance-sorted). This just nudges the pick
+// away from obviously-wrong results — long lives/mixes, reaction
+// videos, etc. — toward something that actually matches the query.
+function pickBestMatch(videos, query) {
+  const q = String(query || "").toLowerCase();
+  const qWords = q.split(/\s+/).filter(Boolean);
+
+  const BAD_HINTS = ["reaction", "live concert", "full concert", "trailer", "interview"];
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  videos.forEach((v, index) => {
+    const title = String(v.title || "").toLowerCase();
+    let score = 0;
+
+    // yt-search already returns results in relevance order — reward
+    // earlier positions, but not so heavily that a clearly-better
+    // title match further down can't win.
+    score -= index * 2;
+
+    const matchedWords = qWords.filter((w) => title.includes(w)).length;
+    score += matchedWords * 5;
+
+    if (BAD_HINTS.some((h) => title.includes(h))) score -= 15;
+
+    // Extremely long results are usually mixes/compilations, not the track itself
+    const seconds = v.seconds || (v.duration && v.duration.seconds) || 0;
+    if (seconds > 15 * 60) score -= 10;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = v;
+    }
+  });
+
+  return best || videos[0];
+}
+
 // ---------------------------------------------------------------------------
 // Command configuration
 // ---------------------------------------------------------------------------
@@ -97,7 +111,7 @@ module.exports = {
   config: {
     name: "song",
     aliases: ["ytsong", "gan"],
-    version: "1.0.0",
+    version: "2.0.0",
     author: "Mahabub",
     usePrefix: true,
     role: 0,
@@ -105,7 +119,7 @@ module.exports = {
     countDown: 8,
 
     description: {
-      en: "গানের নাম দিয়ে সার্চ করে ডাউনলোড করুন",
+      en: "গানের নাম দিয়ে সার্চ করে সরাসরি অডিও পাঠায়",
     },
 
     guide: {
@@ -127,20 +141,11 @@ module.exports = {
       noResults:
         "😔 \"%1\" নামে কোনো গান পাওয়া যায়নি।",
 
-      resultsTitle:
-        "🎵 \"%1\" এর সাথে মিলে যাওয়া গান — একটা বেছে নিন:",
-
-      resultButton:
-        "%1 • %2",
-
-      sessionExpired:
-        "⌛ এই সেশনের মেয়াদ শেষ। আবার সার্চ করুন {pn} <নাম> লিখে।",
-
       fetching:
-        "🎵 লিংক প্রস্তুত করা হচ্ছে... (৩০-৬০ সেকেন্ড লাগতে পারে)",
+        "🎵 *%1*\n⏳ লিংক প্রস্তুত করা হচ্ছে... (৩০-৬০ সেকেন্ড লাগতে পারে)",
 
       fetchError:
-        "⚠️ এই গানের অডিও পাওয়া যায়নি। আরেকটা রেজাল্ট বেছে নিন বা আবার সার্চ করুন।",
+        "⚠️ এই গানের অডিও পাওয়া যায়নি। আবার চেষ্টা করুন বা অন্য নামে সার্চ করুন।",
 
       downloading:
         "⬇️ *%1*\n⏳ ডাউনলোড হচ্ছে, একটু অপেক্ষা করুন...",
@@ -154,10 +159,10 @@ module.exports = {
   },
 
   // =========================================================================
-  // COMMAND — search
+  // COMMAND — search, auto-pick best match, download + send
   // =========================================================================
 
-  onStart: async function ({ message, args, getLang, prefix }) {
+  onStart: async function ({ event, message, api, args, getLang, prefix }) {
     const query = args.join(" ").trim();
 
     if (!query) {
@@ -170,250 +175,168 @@ module.exports = {
       getLang("searching").replace("%1", query)
     );
 
+    const chatId = event.threadID;
+    const msgId = statusMsg.message_id;
+
+    let picked;
+
     try {
       const result = await yts(query);
       const videos = (result && result.videos) || [];
 
       if (videos.length === 0) {
         return message.edit(
-          statusMsg.message_id,
+          msgId,
           getLang("noResults").replace("%1", query)
         );
       }
 
-      const top = videos.slice(0, 6);
-
-      const keyboard = top.map((v) => {
-        const token = cacheData({
-          videoId: v.videoId,
-          title: v.title || "Unknown",
-          author: (v.author && v.author.name) || "",
-          duration: (v.seconds || (v.duration && v.duration.seconds)) || 0,
-          thumbnail: v.thumbnail || null,
-        });
-
-        const label = getLang("resultButton")
-          .replace("%1", v.title || "Unknown")
-          .replace("%2", v.timestamp || "?");
-
-        return [
-          {
-            text: label.length > 60 ? label.slice(0, 57) + "..." : label,
-            callback_data: `song:pick:${token}`,
-          },
-        ];
-      });
-
-      await message.edit(
-        statusMsg.message_id,
-        getLang("resultsTitle").replace("%1", query),
-        { reply_markup: { inline_keyboard: keyboard } }
-      );
+      picked = pickBestMatch(videos, query);
     } catch (error) {
       console.error("[SONG SEARCH ERROR]", error);
 
       try {
-        await message.edit(statusMsg.message_id, getLang("searchError"));
+        await message.edit(msgId, getLang("searchError"));
       } catch (_) {}
+      return;
     }
-  },
 
-  // =========================================================================
-  // CALLBACK QUERY — pick + download
-  // =========================================================================
-
-  onCallbackQuery: async function ({ event, api, getLang, callbackData, query }) {
-    // Namespace guard — see apk.js/xnx.js for why this matters: the
-    // framework broadcasts every callback to every command's handler.
-    if (!callbackData || !callbackData.startsWith("song:")) return;
-
-    const callbackQueryId = query && query.id;
+    const videoId = picked.videoId;
+    const title = picked.title || "Unknown";
+    const author = (picked.author && picked.author.name) || "";
+    const duration = picked.seconds || (picked.duration && picked.duration.seconds) || 0;
+    const thumbnail = picked.thumbnail || null;
 
     try {
-      if (callbackQueryId) await api.answerCallbackQuery(callbackQueryId);
+      await message.edit(msgId, getLang("fetching").replace("%1", title));
     } catch (_) {}
 
+    // -------------------------------------------------------------
+    // Resolve the direct audio URL
+    // -------------------------------------------------------------
+
+    let audioUrl;
+
     try {
-      const chatId = event.threadID;
-      const msgId = event.messageID;
+      const apiResult = await songApi.getMp3(`https://youtu.be/${videoId}`);
 
-      const parts = callbackData.split(":");
-      const action = parts[1] || "";
-      const token = parts[2] || "";
-
-      const notify = async (text, showAlert) => {
-        if (!callbackQueryId) return;
-        try {
-          await api.answerCallbackQuery(callbackQueryId, {
-            text,
-            show_alert: !!showAlert,
-          });
-        } catch (_) {}
-      };
-
-      if (action !== "pick") return;
-
-      const cached = getCached(token);
-
-      if (!cached || !cached.videoId) {
-        await notify(getLang("sessionExpired"), true);
-        return;
+      if (!apiResult || !apiResult.success || !apiResult.data || !apiResult.data.download_url) {
+        throw new Error((apiResult && apiResult.error) || "No download_url");
       }
-
-      const { videoId, title, author, duration, thumbnail } = cached;
-
-      await notify(getLang("fetching"));
+      audioUrl = apiResult.data.download_url;
+    } catch (error) {
+      console.error("[SONG FETCH ERROR]", error.message);
 
       try {
-        await api.editMessageText(getLang("fetching"), {
-          chat_id: chatId,
-          message_id: msgId,
-        });
+        await message.edit(msgId, getLang("fetchError"));
       } catch (_) {}
+      return;
+    }
 
-      // ---------------------------------------------------------------
-      // Resolve the direct audio URL
-      // ---------------------------------------------------------------
+    try {
+      await message.edit(msgId, getLang("downloading").replace("%1", title));
+    } catch (_) {}
 
-      let audioUrl;
+    const tempDir = path.join(__dirname, "../temp");
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+    const tempPath = path.join(
+      tempDir,
+      `song_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`
+    );
+
+    let thumbPath = null;
+
+    try {
+      // -------------------------------------------------------------
+      // Size pre-check where possible
+      // -------------------------------------------------------------
 
       try {
-        const result = await songApi.getMp3(`https://youtu.be/${videoId}`);
+        const head = await axios.head(audioUrl, { timeout: 10000 });
+        const sizeMB =
+          parseInt(head.headers["content-length"] || "0", 10) / (1024 * 1024);
 
-        if (!result || !result.success || !result.data || !result.data.download_url) {
-          throw new Error((result && result.error) || "No download_url");
+        if (sizeMB > 49) {
+          return message.reply(getLang("fileTooLarge").replace("%1", audioUrl));
         }
-        audioUrl = result.data.download_url;
-      } catch (error) {
-        console.error("[SONG FETCH ERROR]", error.message);
-
-        try {
-          await api.editMessageText(getLang("fetchError"), {
-            chat_id: chatId,
-            message_id: msgId,
-          });
-        } catch (_) {}
-
-        return;
-      }
-
-      try {
-        await api.editMessageText(
-          getLang("downloading").replace("%1", title),
-          { chat_id: chatId, message_id: msgId, parse_mode: "Markdown" }
-        );
       } catch (_) {}
 
-      const tempDir = path.join(__dirname, "../temp");
-      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+      // -------------------------------------------------------------
+      // Download
+      // -------------------------------------------------------------
 
-      const tempPath = path.join(
-        tempDir,
-        `song_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`
+      await downloadFile(audioUrl, tempPath);
+
+      const stat = fs.statSync(tempPath);
+      const actualMB = stat.size / (1024 * 1024);
+
+      if (actualMB > 49) {
+        fs.unlinkSync(tempPath);
+        return message.reply(getLang("fileTooLarge").replace("%1", audioUrl));
+      }
+
+      // -------------------------------------------------------------
+      // Thumbnail — Telegram's `thumb` param requires a local file/
+      // stream, not a plain URL. Download it first; if that fails,
+      // just skip the thumbnail rather than letting sendAudio crash.
+      // -------------------------------------------------------------
+
+      if (thumbnail) {
+        try {
+          thumbPath = path.join(
+            tempDir,
+            `thumb_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
+          );
+          await downloadFile(thumbnail, thumbPath);
+        } catch (_) {
+          thumbPath = null;
+        }
+      }
+
+      // -------------------------------------------------------------
+      // Send audio — using the raw bot API here (not message.sendAudio)
+      // so we can pass title/performer/duration/thumb and a proper
+      // filename via fileOptions, same as node-telegram-bot-api expects.
+      // -------------------------------------------------------------
+
+      const fileName = `${safeFileName(title)}.mp3`;
+      const durationText = duration
+        ? `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, "0")}`
+        : "?";
+
+      await api.sendAudio(
+        chatId,
+        fs.createReadStream(tempPath),
+        {
+          title,
+          performer: author || undefined,
+          duration: duration || undefined,
+          thumb: thumbPath || undefined,
+          caption: `🎵 *${title}*${author ? `\n👤 ${author}` : ""}\n⏱ ${durationText}`,
+          parse_mode: "Markdown",
+        },
+        { filename: fileName }
       );
 
       try {
-        // -------------------------------------------------------------
-        // Size pre-check where possible
-        // -------------------------------------------------------------
+        await message.delete(msgId);
+      } catch (_) {}
+    } catch (error) {
+      console.error("[SONG DOWNLOAD ERROR]", error.message);
 
+      try {
+        await message.edit(msgId, getLang("sendFailed"));
+      } catch (_) {}
+    } finally {
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch (_) {}
+      if (thumbPath) {
         try {
-          const head = await axios.head(audioUrl, { timeout: 10000 });
-          const sizeMB =
-            parseInt(head.headers["content-length"] || "0", 10) / (1024 * 1024);
-
-          if (sizeMB > 49) {
-            return api.sendMessage(
-              chatId,
-              getLang("fileTooLarge").replace("%1", audioUrl)
-            );
-          }
-        } catch (_) {}
-
-        // -------------------------------------------------------------
-        // Download
-        // -------------------------------------------------------------
-
-        await downloadFile(audioUrl, tempPath);
-
-        const stat = fs.statSync(tempPath);
-        const actualMB = stat.size / (1024 * 1024);
-
-        if (actualMB > 49) {
-          fs.unlinkSync(tempPath);
-          return api.sendMessage(
-            chatId,
-            getLang("fileTooLarge").replace("%1", audioUrl)
-          );
-        }
-
-        // -------------------------------------------------------------
-        // Thumbnail — Telegram's `thumb` param requires a local file/
-        // stream, not a plain URL. Download it first; if that fails,
-        // just skip the thumbnail rather than letting sendAudio crash.
-        // -------------------------------------------------------------
-
-        let thumbPath = null;
-        if (thumbnail) {
-          try {
-            thumbPath = path.join(
-              tempDir,
-              `thumb_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`
-            );
-            await downloadFile(thumbnail, thumbPath);
-          } catch (_) {
-            thumbPath = null;
-          }
-        }
-
-        // -------------------------------------------------------------
-        // Send audio
-        // -------------------------------------------------------------
-
-        const fileName = `${safeFileName(title)}.mp3`;
-        const durationText = duration
-          ? `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, "0")}`
-          : "?";
-
-        await api.sendAudio(
-          chatId,
-          fs.createReadStream(tempPath),
-          {
-            title,
-            performer: author || undefined,
-            duration: duration || undefined,
-            thumb: thumbPath || undefined,
-            caption: `🎵 *${title}*${author ? `\n👤 ${author}` : ""}\n⏱ ${durationText}`,
-            parse_mode: "Markdown",
-          },
-          { filename: fileName }
-        );
-
-        if (thumbPath) {
-          try {
-            fs.unlinkSync(thumbPath);
-          } catch (_) {}
-        }
-
-        try {
-          await api.deleteMessage(chatId, msgId);
-        } catch (_) {}
-      } catch (error) {
-        console.error("[SONG DOWNLOAD ERROR]", error.message);
-
-        try {
-          await api.editMessageText(getLang("sendFailed"), {
-            chat_id: chatId,
-            message_id: msgId,
-          });
-        } catch (_) {}
-      } finally {
-        try {
-          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
         } catch (_) {}
       }
-    } catch (outerError) {
-      console.error("[SONG CALLBACK ERROR]", outerError);
     }
   },
 };
