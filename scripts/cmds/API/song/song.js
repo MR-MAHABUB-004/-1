@@ -82,7 +82,7 @@ async function initiateDownload(videoUrl, format = "mp3") {
     const downloadUrl = `https://p.lbserver.xyz/api/v2/download?button=1&format=${apiFormat}&iframe_source=&url=${encodedUrl}`;
 
     const response = await axios.get(downloadUrl, {
-      timeout: 30000,
+      timeout: 60000,
       headers: {
         authority: "p.lbserver.xyz",
         accept: "*/*",
@@ -110,7 +110,7 @@ async function initiateDownload(videoUrl, format = "mp3") {
 // =========================
 // Helper: Check Progress
 // =========================
-async function checkProgress(progressUrl, { maxAttempts = 60, intervalMs = 3000 } = {}) {
+async function checkProgress(progressUrl, { maxAttempts = 200, intervalMs = 3000 } = {}) {
   let attemptCount = 0;
 
   while (attemptCount < maxAttempts) {
@@ -118,7 +118,7 @@ async function checkProgress(progressUrl, { maxAttempts = 60, intervalMs = 3000 
       attemptCount++;
 
       const response = await axios.get(progressUrl, {
-        timeout: 20000,
+        timeout: 30000,
         headers: {
           "User-Agent": UA,
           Accept: "*/*",
