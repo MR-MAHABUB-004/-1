@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * API/song/song.js
+ * scripts/cmds/API/song/song.js
  * ──────────────────────────────────────────────────────────────
  * In-process YouTube → MP3 resolver.
  *
@@ -11,8 +11,8 @@
  * require() instead of making an HTTP round-trip to an external
  * box. No server, no port, no network hop for our own bot.
  *
- * Usage:
- *   const song = require("../../API/song/song.js");
+ * Usage (from scripts/cmds/song.js):
+ *   const song = require("./API/song/song.js");
  *   const result = await song.getMp3("https://youtu.be/VIDEO_ID");
  *   // result: { success: true, data: { title, author, thumbnail,
  *   //           download_url, format, duration, filesize,
@@ -206,4 +206,3 @@ module.exports = {
   initiateDownload,
   checkProgress,
 };
-
