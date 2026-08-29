@@ -8,7 +8,7 @@
  *   tap a button  → downloads and sends that track as audio
  *
  * Search:   yt-search (npm)
- * Download: 51.68.34.78 mp3 API
+ * Download: scripts/cmds/API/song/song.js (in-process module)
  *
  * Callback format:
  *   song:pick:<token>
@@ -21,7 +21,7 @@ const path = require("path");
 const { promisify } = require("util");
 const stream = require("stream");
 const yts = require("yt-search");
-const songApi = require("../../API/song/song.js");
+const songApi = require("./API/song/song.js");
 
 const finished = promisify(stream.finished);
 
