@@ -2,27 +2,46 @@
 
 const axios = require("axios");
 
-// ── API base (cached) ─────────────────────────────────────────────────────────
-let _apiUrl = null;
-async function getApiUrl() {
-  if (_apiUrl) return _apiUrl;
-  const res = await axios.get(
-    "https://raw.githubusercontent.com/MR-MAHABUB-004/MAHABUB-BOT-STORAGE/refs/heads/main/APIURL.json"
-  );
-  _apiUrl = res.data.sim;
-  return _apiUrl;
-}
+const API_BASE = "https://mahabub-apis.onrender.com/mahabub/simsimi";
 
 // ── Fetch a random unanswered question from API ───────────────────────────────
 async function getRandomQuestion() {
   try {
-    const apiUrl = await getApiUrl();
-    const res    = await axios.get(`${apiUrl}/nt`);
-    return res.data?.question || null;
+    const res = await axios.get(API_BASE, {
+      params: { action: "next" },
+      timeout: 15000,
+    });
+
+    const data = res.data;
+    // Be tolerant of slightly different field names in the response.
+    return (
+      (data && (data.question || data.ques || data.q)) || null
+    );
   } catch (e) {
     console.error("NT getRandomQuestion error:", e.message);
     return null;
   }
+}
+
+async function teach(question, answer) {
+  return axios.get(API_BASE, {
+    params: { action: "teach", q: question, ans: answer },
+    timeout: 15000,
+  });
+}
+
+const ANSWER_TIMEOUT_MS = 60 * 1000;
+
+// If nobody answers a question within ANSWER_TIMEOUT_MS, unsend it so the
+// chat doesn't fill up with stale unanswered prompts.
+function scheduleQuestionTimeout(api, chatId, msgId) {
+  setTimeout(async () => {
+    try {
+      await api.deleteMessage(chatId, msgId);
+    } catch (_) {
+      // Already answered/deleted, or too old to delete — fine either way.
+    }
+  }, ANSWER_TIMEOUT_MS);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +50,7 @@ module.exports = {
   config: {
     name:      "nt",
     aliases:   ["newteach", "teach"],
-    version:   "4.1.0",
+    version:   "4.2.0",
     author:    "MR᭄﹅ MAHABUB﹅ メꪜ",
     usePrefix: true,
     role:      0,
@@ -58,12 +77,10 @@ module.exports = {
     },
   },
 
-  onStart: async function ({ event, message, args, getLang, setPendingReply, usersData }) {
+  onStart: async function ({ api, event, message, args, getLang, setPendingReply, usersData }) {
     const text = args.join(" ").trim();
 
     try {
-      const apiUrl = await getApiUrl();
-
       // ── Manual teach: nt ask=Q$ans=A or ask=Q&ans=A ───────────────────────
       if (text.startsWith("ask=") && (text.includes("$ans=") || text.includes("&ans="))) {
         const match = text.match(/ask=(.+?)(?:\$ans=|&ans=)(.+)/);
@@ -73,9 +90,7 @@ module.exports = {
         const answer   = match[2].trim();
         if (!question || !answer) return message.reply(getLang("missingQA"));
 
-        await axios.get(
-          `${apiUrl}/teach?q=${encodeURIComponent(question)}&ans=${encodeURIComponent(answer)}`
-        );
+        await teach(question, answer);
 
         return message.reply(
           getLang("taught").replace("%1", question).replace("%2", answer)
@@ -86,13 +101,18 @@ module.exports = {
       const question = await getRandomQuestion();
       if (!question) return message.reply(getLang("noQuestion"));
 
-      await message.reply(getLang("question").replace("%1", question));
+      const sent = await message.reply(getLang("question").replace("%1", question));
 
-      // Register onReply — next reply from this user goes to onReply handler
-      setPendingReply("nt", {
-        author:   event.senderID,
-        question,
-      });
+      // Register onReply — fires only when the user Telegram-replies to
+      // this specific question message (see core/handleMessage.js).
+      if (sent) {
+        setPendingReply("nt", {
+          author:    event.senderID,
+          question,
+          messageID: sent.message_id,
+        });
+        scheduleQuestionTimeout(api, event.threadID, sent.message_id);
+      }
 
     } catch (e) {
       console.error("nt onStart error:", e.message);
@@ -100,20 +120,18 @@ module.exports = {
     }
   },
 
-  onReply: async function ({ event, message, getLang, pendingData, setPendingReply, usersData }) {
+  onReply: async function ({ api, event, message, getLang, pendingData, setPendingReply, usersData }) {
     // Only the user who triggered the question can answer
     if (pendingData.author !== event.senderID) return;
 
     const answer = event.body?.trim();
     if (!answer) return;
 
-    try {
-      const apiUrl = await getApiUrl();
+    const chatId = event.threadID;
 
+    try {
       // Save the answer to the API
-      await axios.get(
-        `${apiUrl}/teach?q=${encodeURIComponent(pendingData.question)}&ans=${encodeURIComponent(answer)}`
-      );
+      await teach(pendingData.question, answer);
 
       // Reward the user with money
       const user = usersData.getOrCreate(event.senderID);
@@ -121,7 +139,17 @@ module.exports = {
       const updatedUser = usersData.get(event.senderID);
       const name        = user.name || `User ${event.senderID}`;
 
-      await message.reply(
+      // The question has now been answered — clear it out of the chat
+      // instead of letting it (and the 60s timer scheduled for it) linger.
+      // Deleting twice (here and from the timer) is harmless — the second
+      // call just fails silently.
+      if (pendingData.messageID) {
+        try {
+          await api.deleteMessage(chatId, pendingData.messageID);
+        } catch (_) {}
+      }
+
+      const savedMsg = await message.reply(
         getLang("saved")
           .replace("%1", pendingData.question)
           .replace("%2", answer)
@@ -129,16 +157,30 @@ module.exports = {
           .replace("%4", name)
       );
 
-      // Immediately serve the next question and keep chain going
+      // Immediately serve the next question and keep the chain going
       const nextQuestion = await getRandomQuestion();
       if (!nextQuestion) return;
 
-      await message.reply(getLang("question").replace("%1", nextQuestion));
+      const sent = await message.reply(getLang("question").replace("%1", nextQuestion));
 
-      setPendingReply("nt", {
-        author:   event.senderID,
-        question: nextQuestion,
-      });
+      if (sent) {
+        setPendingReply("nt", {
+          author:    event.senderID,
+          question:  nextQuestion,
+          messageID: sent.message_id,
+        });
+        scheduleQuestionTimeout(api, chatId, sent.message_id);
+      }
+
+      // Clean up the "✅ Reply saved!" confirmation shortly after, so the
+      // chat doesn't pile up with old confirmations.
+      if (savedMsg) {
+        setTimeout(async () => {
+          try {
+            await api.deleteMessage(chatId, savedMsg.message_id);
+          } catch (_) {}
+        }, 4000);
+      }
 
     } catch (e) {
       console.error("nt onReply error:", e.message);
