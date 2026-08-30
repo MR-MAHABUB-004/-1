@@ -32,8 +32,9 @@ function checkCooldown(userId, cmdName, seconds) {
 }
 
 // ── PENDING REPLY MAP ─────────────────────────────────────────────────────────
-// key: "chatId:userId"  →  { commandName, author, ...extra }
-// Fires on the user's NEXT message — no Telegram reply needed (like GoatBot)
+// key: "chatId:userId"  →  { commandName, author, messageID, ...extra }
+// Fires ONLY when the user actually Telegram-replies to the specific bot
+// message that registered the pending reply (see messageID matching below).
 const pendingReplies = new Map();
 
 function setPendingReply(chatId, userId, cmdName, extra = {}) {
@@ -111,25 +112,21 @@ async function handleMessage(bot, msg) {
 
   const { commands } = global.GoatBot;
 
-  // ── 5. onReply — fires on user's NEXT message (no Telegram reply needed) ──
-  //    This matches GoatBot behaviour exactly: setPendingReply() waits for
-  //    any next message from that user in that chat, not a quoted reply.
+  // ── 5. onReply — fires ONLY when the user actually Telegram-replies to
+  //    the specific bot message that set up the pending reply. We store
+  //    the bot's message_id in pending.messageID (commands must pass this
+  //    when calling setPendingReply) and require event.messageReply to
+  //    point at that exact id — not just any next message from the user.
   const pending = getPendingReply(chatId, userId);
   if (pending) {
-    const cmd = commands.get(pending.commandName);
-    if (cmd && typeof cmd.onReply === "function") {
-      // Check if current text is a new command — if so, let it through instead
-      const isNewCommand = [...commands.values()].some(c => {
-        const names      = [c.config.name, ...(c.config.aliases || [])].map(n => n.toLowerCase());
-        const escaped    = names.map(escapeRegex).join("|");
-        const usePrefix  = c.config.usePrefix !== false;
-        const pat        = usePrefix
-          ? new RegExp(`^${escapeRegex(prefix)}\\s*(${escaped})(?:\\s|$)`, "i")
-          : new RegExp(`^(${escaped})(?:\\s|$)`, "i");
-        return pat.test(text);
-      });
+    const repliedToTrackedMsg =
+      event.messageReply &&
+      pending.messageID != null &&
+      String(event.messageReply.messageID) === String(pending.messageID);
 
-      if (!isNewCommand) {
+    if (repliedToTrackedMsg) {
+      const cmd = commands.get(pending.commandName);
+      if (cmd && typeof cmd.onReply === "function") {
         await safeRun(`onReply:${pending.commandName}`, async () => {
           const getLang = makeLangGetter(cmd.langs || {}, config.language);
           await cmd.onReply({
@@ -146,10 +143,10 @@ async function handleMessage(bot, msg) {
         }
         return;
       }
-
-      // New command was typed — clear the pending reply
-      clearPendingReply(chatId, userId);
     }
+    // Not a reply to the tracked message (or replied to something else) —
+    // fall through to normal command dispatch below, leave pending as-is
+    // so a real reply later can still land on it.
   }
 
   // ── 6. Command dispatch ───────────────────────────────────────────────────
@@ -284,7 +281,11 @@ async function handleCallbackQuery(bot, query) {
 
   for (const [, cmd] of commands) {
     if (typeof cmd.onCallbackQuery !== "function") continue;
-    await safeRun(`cbq_cmd`, () => cmd.onCallbackQuery?.({ ...ctx, callbackData: data }));
+    // getLang must be built and passed here too — without it, every
+    // command's onCallbackQuery crashes the moment it calls getLang(),
+    // which is why buttons silently did nothing before this fix.
+    const getLang = makeLangGetter(cmd.langs || {}, config.language);
+    await safeRun(`cbq_cmd`, () => cmd.onCallbackQuery?.({ ...ctx, getLang, callbackData: data }));
   }
 
   bot.answerCallbackQuery(query.id).catch(() => {});
