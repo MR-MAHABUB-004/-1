@@ -1,5 +1,14 @@
 "use strict";
 
+// Telegram's legacy Markdown parser breaks if user-supplied text (names,
+// usernames) contains unescaped _, *, `, or [ — it treats them as
+// formatting markers and errors out with "can't find end of the entity"
+// when they're not paired. Escape them before inserting into any
+// Markdown-formatted reply.
+function escapeMarkdown(text) {
+  return String(text || "").replace(/([_*`\[])/g, "\\$1");
+}
+
 module.exports = {
   config: {
     name:      "user",
@@ -52,7 +61,7 @@ module.exports = {
       const user = await usersData.getOrCreate(targetId);
       await usersData.set(targetId, key, val);
 
-      const name = user.name || `User ${targetId}`;
+      const name = escapeMarkdown(user.name || `User ${targetId}`);
       return message.reply(
         getLang("setDone").replace("%1", key).replace("%2", val).replace("%3", name)
       );
@@ -70,8 +79,8 @@ module.exports = {
     const user = await usersData.get(targetId);
     if (!user) return message.reply(getLang("noData"));
 
-    const name     = user.name || `${targetFrom.first_name || ""}`.trim();
-    const username = targetFrom.username ? `@${targetFrom.username}` : "none";
+    const name     = escapeMarkdown(user.name || `${targetFrom.first_name || ""}`.trim());
+    const username = escapeMarkdown(targetFrom.username ? `@${targetFrom.username}` : "none");
     const firstSeen = user.createdAt
       ? new Date(user.createdAt).toLocaleDateString("en-US")
       : "unknown";
