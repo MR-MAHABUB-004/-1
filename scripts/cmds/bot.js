@@ -2,7 +2,7 @@
 
 const axios = require("axios");
 
-const API_BASE = "https://mahabub-nirob-simisimi.onrender.com";
+const API_BASE = "https://simisimi-z66r.onrender.com";
 
 // ── Add your greetings here ───────────────────────────────────────────────────
 const GREETINGS = [
