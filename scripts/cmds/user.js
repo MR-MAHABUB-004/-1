@@ -49,8 +49,8 @@ module.exports = {
         targetId = String(msg.reply_to_message.from.id);
       }
 
-      const user = usersData.getOrCreate(targetId);
-      usersData.set(targetId, key, val);
+      const user = await usersData.getOrCreate(targetId);
+      await usersData.set(targetId, key, val);
 
       const name = user.name || `User ${targetId}`;
       return message.reply(
@@ -67,7 +67,7 @@ module.exports = {
       targetId   = String(targetFrom.id);
     }
 
-    const user = usersData.get(targetId);
+    const user = await usersData.get(targetId);
     if (!user) return message.reply(getLang("noData"));
 
     const name     = user.name || `${targetFrom.first_name || ""}`.trim();
