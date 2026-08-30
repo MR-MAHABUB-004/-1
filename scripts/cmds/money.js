@@ -6,7 +6,7 @@ const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 module.exports = {
   config: {
     name:      "money",
-    aliases:   ["bal", "balance", "daily", "give", "pay"],
+    aliases:   ["bal", "balance", "daily"],
     version:   "1.0",
     author:    "System",
     usePrefix: true,
@@ -44,7 +44,7 @@ module.exports = {
     const senderId = event.senderID;
     const subCmd   = args[0]?.toLowerCase();
 
-    const sender = usersData.getOrCreate(senderId, {
+    const sender = await usersData.getOrCreate(senderId, {
       name: `${msg.from.first_name || ""}`.trim(),
     });
 
@@ -71,7 +71,7 @@ module.exports = {
       }
 
       const newBalance = (sender.money || 0) + DAILY_AMOUNT;
-      usersData.update(senderId, { money: newBalance, lastDaily: now });
+      await usersData.update(senderId, { money: newBalance, lastDaily: now });
 
       return message.reply(
         getLang("dailyClaimed")
@@ -87,21 +87,21 @@ module.exports = {
       const targetId = String(msg.reply_to_message.from.id);
       if (targetId === senderId) return message.reply(getLang("giveSelf"));
 
-      const amount = parseInt(args[1] || args[0] === "give" ? args[1] : args[0], 10);
+      const amount = parseInt(args[1], 10);
       if (!amount || amount <= 0) return message.reply(getLang("giveNoAmount"));
 
       if ((sender.money || 0) < amount) {
         return message.reply(getLang("giveNoFunds").replace("%1", (sender.money || 0).toLocaleString()));
       }
 
-      const target     = usersData.getOrCreate(targetId, {
+      const target = await usersData.getOrCreate(targetId, {
         name: `${msg.reply_to_message.from.first_name || ""}`.trim(),
       });
       const newSender  = (sender.money  || 0) - amount;
       const newTarget  = (target.money  || 0) + amount;
 
-      usersData.update(senderId, { money: newSender });
-      usersData.update(targetId, { money: newTarget });
+      await usersData.update(senderId, { money: newSender });
+      await usersData.update(targetId, { money: newTarget });
 
       return message.reply(
         getLang("giveSuccess")
@@ -113,7 +113,7 @@ module.exports = {
 
     // ── top leaderboard ───────────────────────────────────────────────────────
     if (subCmd === "top") {
-      const all = Object.values(usersData.getAll());
+      const all = Object.values(await usersData.getAll());
       if (!all.length) return message.reply(getLang("noUsers"));
 
       const sorted = all.sort((a, b) => (b.money || 0) - (a.money || 0)).slice(0, 10);
