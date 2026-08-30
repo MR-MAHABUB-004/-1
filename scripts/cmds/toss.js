@@ -3,7 +3,7 @@
 module.exports = {
   config: {
     name:      "toss",
-    aliases:   ["coin", "flip", "dice", "roll"],
+    aliases:   ["coinflip", "flip", "dice", "roll"],
     version:   "1.0",
     author:    "System",
     usePrefix: true,
@@ -56,7 +56,7 @@ module.exports = {
       if (!["heads","tails"].includes(side)) return message.reply(getLang("betBadSide"));
 
       const userId = event.senderID;
-      const user   = usersData.getOrCreate(userId, {
+      const user   = await usersData.getOrCreate(userId, {
         name: `${msg.from.first_name || ""}`.trim(),
       });
 
@@ -67,7 +67,7 @@ module.exports = {
       const outcome = Math.random() < 0.5 ? "heads" : "tails";
       const won     = outcome === side;
       const newBal  = (user.money || 0) + (won ? amount : -amount);
-      usersData.set(userId, "money", newBal);
+      await usersData.set(userId, "money", newBal);
 
       const outcomeLabel = outcome.charAt(0).toUpperCase() + outcome.slice(1);
       if (won) {
