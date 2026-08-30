@@ -3,7 +3,7 @@
 module.exports = {
   config: {
     name:      "rank",
-    aliases:   ["exp", "level", "profile"],
+    aliases:   ["rnk", "level"],
     version:   "1.0",
     author:    "System",
     usePrefix: true,
@@ -26,14 +26,14 @@ module.exports = {
   // Called on every message to add EXP passively
   onChat: async function ({ event, usersData }) {
     if (!event.senderID) return;
-    const user = usersData.getOrCreate(event.senderID);
-    usersData.update(event.senderID, { exp: (user.exp || 0) + 1 });
+    const user = await usersData.getOrCreate(event.senderID);
+    await usersData.update(event.senderID, { exp: (user.exp || 0) + 1 });
   },
 
   onStart: async function ({ event, message, args, getLang, usersData }) {
     // ── Leaderboard ───────────────────────────────────────────────────────────
     if (args[0] === "top") {
-      const all = Object.values(usersData.getAll());
+      const all = Object.values(await usersData.getAll());
       if (!all.length) return message.reply(getLang("noData"));
 
       const sorted = all.sort((a, b) => (b.exp || 0) - (a.exp || 0)).slice(0, 10);
@@ -54,7 +54,7 @@ module.exports = {
       ? msg.reply_to_message.from
       : msg.from;
 
-    const user  = usersData.getOrCreate(String(from.id));
+    const user  = await usersData.getOrCreate(String(from.id));
     const exp   = user.exp || 0;
     const level = Math.floor(Math.sqrt(exp / 10));
     const name  = user.name || `${from.first_name || ""}`.trim();
