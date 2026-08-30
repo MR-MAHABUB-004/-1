@@ -133,11 +133,12 @@ module.exports = {
       // Save the answer to the API
       await teach(pendingData.question, answer);
 
-      // Reward the user with money
-      const user = usersData.getOrCreate(event.senderID);
-      usersData.update(event.senderID, { money: (user.money || 0) + 100 });
-      const updatedUser = usersData.get(event.senderID);
-      const name        = user.name || `User ${event.senderID}`;
+      // Reward the user with money (usersData methods are async — must await!)
+      const user = await usersData.getOrCreate(event.senderID);
+      const updatedUser = await usersData.update(event.senderID, {
+        money: (user.money || 0) + 100,
+      });
+      const name = user.name || `User ${event.senderID}`;
 
       // The question has now been answered — clear it out of the chat
       // instead of letting it (and the 60s timer scheduled for it) linger.
