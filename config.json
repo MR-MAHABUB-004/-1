@@ -12,7 +12,7 @@
   "webhookUrl": "",
   "useWebhook": false,
   "port": 20158,
-  "api": "https://mahabub-apis.fun",
+  "api": "https://mahabub.apis34.rf.gd",
   "cooldownDefault": 3,
   "forceJoin": {
     "enabled": false,
