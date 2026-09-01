@@ -1,8 +1,8 @@
 "use strict";
 
 const axios = require("axios");
-
-const API_BASE = "https://mahabub-apis.onrender.com/mahabub/simsimi";
+const baseUrl = global.GoatBot.config.api;
+const API_BASE = `${baseUrl}/mahabub/simsimi`;
 
 // ── Fetch a random unanswered question from API ───────────────────────────────
 async function getRandomQuestion() {
