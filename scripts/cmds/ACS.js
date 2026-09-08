@@ -1,358 +1,540 @@
 "use strict";
 
+const { createCanvas, loadImage } = require("canvas");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const sharp = require("sharp");
 
-// ─────────────────────────────────────────────────────────────
-// ACS TEAM LOGO
-// Keep this URL unchanged if you want the same ACS circular logo
-// as the original Messenger version.
-// ─────────────────────────────────────────────────────────────
-const ACS_LOGO_URL = "https://i.ibb.co/gF4K2Vfc/image0.jpg";
+module.exports = {
+config: {
+name: "acslogo",
+aliases: ["acs", "logo"],
+version: "2.0",
+author: "Mesbah Saxx / Modified for Telegram",
 
-const BG_COLOR = "#01321f";
+usePrefix: true,
 
-const OUTPUT_SIZE = 800;
-const UPSCALE = 2;
+role: 0,
+category: "media",
+countDown: 3,
 
-const LOGO_SIZE = Math.round(OUTPUT_SIZE * 0.12);
-const LOGO_X = Math.round(OUTPUT_SIZE * 0.10);
-const LOGO_Y = Math.round(OUTPUT_SIZE * 0.12);
+description: {
+  en: "Generate ACS style logo images from a Telegram photo.",
+},
 
-const PART_COUNT = 4;
-const DESIRED_RATIO = 2 / 3;
+guide: {
+  en:
+    "{pn} — reply to a photo\n" +
+    "{pn} <image URL> — generate from an image URL",
+},
 
-// ─────────────────────────────────────────────────────────────
-// Download URL as Buffer
-// ─────────────────────────────────────────────────────────────
-async function downloadBuffer(url) {
-  const response = await axios.get(url, {
-    responseType: "arraybuffer",
-    timeout: 30000,
-    maxContentLength: 25 * 1024 * 1024,
+},
+
+langs: {
+en: {
+noImage:
+"❌ Please reply to an image or provide an image URL.",
+
+  processing:
+    "⏳ Creating ACS logo images...",
+
+  success:
+    "✅ ACS logo images generated successfully!",
+
+  failed:
+    "❌ Failed to generate ACS logo.",
+},
+
+},
+
+onStart: async function ({
+message,
+event,
+args,
+getLang,
+}) {
+const tempFiles = [];
+
+try {
+  let avatarUrl = args[0];
+
+  /*
+   * ─────────────────────────────────────────────
+   * 1. Get image URL from command argument
+   * ─────────────────────────────────────────────
+   */
+
+  if (!avatarUrl && event.messageReply) {
+    const reply = event.messageReply;
+
+    /*
+     * Different Telegram adapters may expose
+     * the replied photo in different fields.
+     */
+
+    if (reply.attachments?.length) {
+      const attachment = reply.attachments[0];
+
+      avatarUrl =
+        attachment.url ||
+        attachment.fileUrl ||
+        attachment.file_url;
+    }
+
+    avatarUrl =
+      avatarUrl ||
+      reply.photo?.[reply.photo.length - 1]?.url ||
+      reply.photo?.[reply.photo.length - 1]?.fileUrl;
+  }
+
+  /*
+   * ─────────────────────────────────────────────
+   * 2. Get image directly from current message
+   * ─────────────────────────────────────────────
+   */
+
+  if (!avatarUrl && event.attachments?.length) {
+    const attachment = event.attachments[0];
+
+    avatarUrl =
+      attachment.url ||
+      attachment.fileUrl ||
+      attachment.file_url;
+  }
+
+  /*
+   * If your Telegram event stores photo as fileId,
+   * your framework should convert it to a usable URL
+   * before reaching this command.
+   */
+
+  if (!avatarUrl) {
+    return message.reply(getLang("noImage"));
+  }
+
+  await message.reply(getLang("processing"));
+
+  /*
+   * ─────────────────────────────────────────────
+   * 3. ACS logo
+   * ─────────────────────────────────────────────
+   */
+
+  const logoUrl =
+    "https://raw.githubusercontent.com/MR-MAHABUB-004/MAHABUB-BOT-STORAGE/refs/heads/main/img/1788884508053.png";
+
+  /*
+   * ─────────────────────────────────────────────
+   * 4. Download source images
+   * ─────────────────────────────────────────────
+   */
+
+  const [avatarRes, logoRes] = await Promise.all([
+    axios.get(avatarUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+    }),
+
+    axios.get(logoUrl, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+    }),
+  ]);
+
+  const img = await loadImage(
+    Buffer.from(avatarRes.data)
+  );
+
+  const logo = await loadImage(
+    Buffer.from(logoRes.data)
+  );
+
+  /*
+   * ─────────────────────────────────────────────
+   * 5. Canvas settings
+   * ─────────────────────────────────────────────
+   */
+
+  const bgSize = 800;
+  const upscaleFactor = 2;
+
+  const logoSize = bgSize * 0.12;
+
+  const desiredRatio = 2 / 3;
+
+  const attachments = [];
+
+  /*
+   * ─────────────────────────────────────────────
+   * Helper: draw ACS circular logo
+   * ─────────────────────────────────────────────
+   */
+
+  function drawACSLogo(ctx) {
+    const logoX = bgSize * 0.10;
+    const logoY = bgSize * 0.12;
+
+    const logoRadius = logoSize / 2;
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.arc(
+      logoX + logoRadius,
+      logoY + logoRadius,
+      logoRadius,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.drawImage(
+      logo,
+      logoX,
+      logoY,
+      logoSize,
+      logoSize
+    );
+
+    ctx.restore();
+  }
+
+  /*
+   * ─────────────────────────────────────────────
+   * 6. If image is already 2:3
+   * ─────────────────────────────────────────────
+   */
+
+  const currentRatio =
+    img.width / img.height;
+
+  if (
+    Math.abs(currentRatio - desiredRatio) < 0.01
+  ) {
+    const canvas =
+      createCanvas(bgSize, bgSize);
+
+    const ctx =
+      canvas.getContext("2d");
+
+    /*
+     * ACS background
+     */
+
+    ctx.fillStyle = "#01321f";
+
+    ctx.fillRect(
+      0,
+      0,
+      bgSize,
+      bgSize
+    );
+
+    /*
+     * Fit image vertically
+     */
+
+    const scale =
+      bgSize / img.height;
+
+    const targetWidth =
+      img.width * scale;
+
+    const dx =
+      (bgSize - targetWidth) / 2;
+
+    ctx.drawImage(
+      img,
+      0,
+      0,
+      img.width,
+      img.height,
+      dx,
+      0,
+      targetWidth,
+      bgSize
+    );
+
+    /*
+     * ACS circular logo
+     */
+
+    drawACSLogo(ctx);
+
+    /*
+     * PNG buffer
+     */
+
+    const tempBuffer =
+      canvas.toBuffer("image/png");
+
+    /*
+     * Upscale
+     */
+
+    const outputBuffer =
+      await sharp(tempBuffer)
+        .resize(
+          bgSize * upscaleFactor,
+          bgSize * upscaleFactor
+        )
+        .png()
+        .toBuffer();
+
+    const fileName =
+      path.join(
+        __dirname,
+        `acs_logo_${Date.now()}.png`
+      );
+
+    fs.writeFileSync(
+      fileName,
+      outputBuffer
+    );
+
+    tempFiles.push(fileName);
+
+    attachments.push(
+      fs.createReadStream(fileName)
+    );
+  }
+
+  /*
+   * ─────────────────────────────────────────────
+   * 7. Generate 4 static slices
+   * ─────────────────────────────────────────────
+   */
+
+  else {
+    const partCount = 4;
+
+    const partHeight =
+      img.height;
+
+    const partWidth =
+      partHeight * desiredRatio;
+
+    /*
+     * Make sure crop width doesn't exceed image.
+     */
+
+    const actualPartWidth =
+      Math.min(
+        partWidth,
+        img.width
+      );
+
+    /*
+     * Maximum safe X position.
+     */
+
+    const maxStartX =
+      Math.max(
+        0,
+        img.width - actualPartWidth
+      );
+
+    /*
+     * Generate four different crops.
+     */
+
+    for (
+      let i = 0;
+      i < partCount;
+      i++
+    ) {
+      const canvas =
+        createCanvas(
+          bgSize,
+          bgSize
+        );
+
+      const ctx =
+        canvas.getContext("2d");
+
+      /*
+       * Background
+       */
+
+      ctx.fillStyle =
+        "#01321f";
+
+      ctx.fillRect(
+        0,
+        0,
+        bgSize,
+        bgSize
+      );
+
+      /*
+       * Static crop positions
+       */
+
+      let sx = 0;
+
+      if (partCount > 1) {
+        sx =
+          (maxStartX / (partCount - 1)) * i;
+      }
+
+      /*
+       * Keep crop inside image.
+       */
+
+      sx = Math.max(
+        0,
+        Math.min(
+          sx,
+          maxStartX
+        )
+      );
+
+      const sy = 0;
+
+      const sw =
+        actualPartWidth;
+
+      const sh =
+        partHeight;
+
+      /*
+       * Scale crop to canvas.
+       */
+
+      const scale =
+        bgSize / sh;
+
+      const targetWidth =
+        sw * scale;
+
+      const dx =
+        (bgSize - targetWidth) / 2;
+
+      ctx.drawImage(
+        img,
+        sx,
+        sy,
+        sw,
+        sh,
+        dx,
+        0,
+        targetWidth,
+        bgSize
+      );
+
+      /*
+       * ACS circular logo.
+       */
+
+      drawACSLogo(ctx);
+
+      /*
+       * Convert canvas to PNG.
+       */
+
+      const tempBuffer =
+        canvas.toBuffer(
+          "image/png"
+        );
+
+      /*
+       * Upscale output.
+       */
+
+      const outputBuffer =
+        await sharp(tempBuffer)
+          .resize(
+            bgSize * upscaleFactor,
+            bgSize * upscaleFactor
+          )
+          .png()
+          .toBuffer();
+
+      const fileName =
+        path.join(
+          __dirname,
+          `acs_logo_part_${i + 1}_${Date.now()}.png`
+        );
+
+      fs.writeFileSync(
+        fileName,
+        outputBuffer
+      );
+
+      tempFiles.push(fileName);
+
+      attachments.push(
+        fs.createReadStream(
+          fileName
+        )
+      );
+    }
+  }
+
+  /*
+   * ─────────────────────────────────────────────
+   * 8. Send generated images
+   * ─────────────────────────────────────────────
+   *
+   * Telegram adapter may accept:
+   *
+   * message.reply({
+   *   attachment: [...]
+   * })
+   *
+   * If your adapter expects `files`,
+   * change only this part.
+   */
+
+  await message.reply({
+    attachment: attachments,
   });
 
-  return Buffer.from(response.data);
-}
+  /*
+   * ─────────────────────────────────────────────
+   * 9. Cleanup
+   * ─────────────────────────────────────────────
+   */
 
-// ─────────────────────────────────────────────────────────────
-// Get Telegram image URL
-// ─────────────────────────────────────────────────────────────
-async function getTelegramImageUrl(api, fileId) {
-  return await api.getFileLink(fileId);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Make circular ACS logo
-// ─────────────────────────────────────────────────────────────
-async function createCircularLogo(logoBuffer) {
-  const circleMask = Buffer.from(`
-    <svg width="${LOGO_SIZE}" height="${LOGO_SIZE}">
-      <circle
-        cx="${LOGO_SIZE / 2}"
-        cy="${LOGO_SIZE / 2}"
-        r="${LOGO_SIZE / 2}"
-        fill="white"
-      />
-    </svg>
-  `);
-
-  return await sharp(logoBuffer)
-    .resize(LOGO_SIZE, LOGO_SIZE, {
-      fit: "cover",
-      position: "centre",
-    })
-    .composite([
-      {
-        input: circleMask,
-        blend: "dest-in",
-      },
-    ])
-    .png()
-    .toBuffer();
-}
-
-// ─────────────────────────────────────────────────────────────
-// Generate one ACS image
-// ─────────────────────────────────────────────────────────────
-async function generatePart(imageBuffer, logoBuffer, index) {
-  const meta = await sharp(imageBuffer).metadata();
-
-  const width = meta.width;
-  const height = meta.height;
-
-  if (!width || !height) {
-    throw new Error("Invalid image dimensions.");
-  }
-
-  // Width of a 2:3 crop
-  let cropWidth = Math.floor(height * DESIRED_RATIO);
-
-  // If image is smaller than required crop, use full width
-  cropWidth = Math.min(cropWidth, width);
-
-  // Static slice position, similar to the original code
-  let left;
-
-  if (width <= cropWidth) {
-    left = 0;
-  } else {
-    const maxLeft = width - cropWidth;
-
-    left = Math.floor(
-      (index * maxLeft) / (PART_COUNT - 1)
-    );
-  }
-
-  // Crop image
-  const cropped = await sharp(imageBuffer)
-    .extract({
-      left,
-      top: 0,
-      width: cropWidth,
-      height,
-    })
-    .resize(OUTPUT_SIZE, OUTPUT_SIZE, {
-      fit: "contain",
-      background: BG_COLOR,
-      position: "centre",
-    })
-    .png()
-    .toBuffer();
-
-  // Background
-  const background = Buffer.from(`
-    <svg width="${OUTPUT_SIZE}" height="${OUTPUT_SIZE}">
-      <rect
-        width="100%"
-        height="100%"
-        fill="${BG_COLOR}"
-      />
-    </svg>
-  `);
-
-  // Circular ACS logo
-  const circularLogo = await createCircularLogo(logoBuffer);
-
-  // Composite everything
-  const finalImage = await sharp(background)
-    .composite([
-      {
-        input: cropped,
-        left: 0,
-        top: 0,
-      },
-      {
-        input: circularLogo,
-        left: LOGO_X,
-        top: LOGO_Y,
-      },
-    ])
-    .resize(OUTPUT_SIZE * UPSCALE, OUTPUT_SIZE * UPSCALE)
-    .png()
-    .toBuffer();
-
-  return finalImage;
-}
-
-// ─────────────────────────────────────────────────────────────
-// MAIN COMMAND
-// ─────────────────────────────────────────────────────────────
-module.exports = {
-  config: {
-    name: "acslogo",
-    aliases: ["acs"],
-    version: "1.0.0",
-    author: "Mahabub",
-    usePrefix: true,
-    role: 2,
-    countDown: 5,
-
-    category: "image",
-
-    description: {
-      en: "Automatically creates ACS team logo images from photos.",
-    },
-
-    guide: {
-      en:
-        "{pn} — reply to an image\n\n" +
-        "You can also simply send an image without using the command.",
-    },
-  },
-
-  // ───────────────────────────────────────────────────────────
-  // Manual command
-  // /acslogo + reply to image
-  // ───────────────────────────────────────────────────────────
-  onStart: async function ({ api, event, message }) {
+  for (const file of tempFiles) {
     try {
-      let fileId = null;
-
-      // Current message image
-      if (event.attachments?.length) {
-        const photo = event.attachments.find(
-          a => a.type === "photo"
-        );
-
-        if (photo) {
-          fileId = photo.fileId;
-        }
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
       }
-
-      // Replied image
-      if (
-        !fileId &&
-        event.messageReply?.attachments?.length
-      ) {
-        const photo = event.messageReply.attachments.find(
-          a => a.type === "photo"
-        );
-
-        if (photo) {
-          fileId = photo.fileId;
-        }
-      }
-
-      if (!fileId) {
-        return message.reply(
-          "🖼️ Please send/reply to an image.\n\n" +
-          "Or simply send a new image — ACS logo will be generated automatically."
-        );
-      }
-
-      await generateACS(api, message, fileId);
-
-    } catch (error) {
-      console.error("[ACSLOGO]", error);
-      return message.reply(
-        "❌ Failed to generate ACS logo.\nPlease try another image."
+    } catch (e) {
+      console.error(
+        "Cleanup error:",
+        e.message
       );
     }
-  },
+  }
 
-  // ───────────────────────────────────────────────────────────
-  // AUTO MODE
-  //
-  // User simply sends an image
-  // → ACS logo generated automatically
-  // ───────────────────────────────────────────────────────────
-  onChat: async function ({ api, event, message }) {
+} catch (err) {
+  console.error(
+    "ACS LOGO ERROR:",
+    err
+  );
+
+  /*
+   * Cleanup even when generation fails.
+   */
+
+  for (const file of tempFiles) {
     try {
-      // Ignore bot-generated messages
-      if (event.raw?.from?.is_bot) return;
-
-      let fileId = null;
-
-      // Telegram normal photo
-      const photo = event.attachments?.find(
-        a => a.type === "photo"
-      );
-
-      if (photo) {
-        fileId = photo.fileId;
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
       }
+    } catch (_) {}
+  }
 
-      // Telegram image sent as document
-      if (
-        !fileId &&
-        event.raw?.document?.mime_type?.startsWith("image/")
-      ) {
-        fileId = event.raw.document.file_id;
-      }
+  return message.reply(
+    getLang("failed")
+  );
+}
 
-      if (!fileId) return;
-
-      await generateACS(api, message, fileId);
-
-    } catch (error) {
-      console.error("[ACSLOGO AUTO]", error);
-
-      // Don't spam the chat if auto-generation fails
-      return;
-    }
-  },
+},
 };
-
-// ─────────────────────────────────────────────────────────────
-// GENERATOR
-// ─────────────────────────────────────────────────────────────
-async function generateACS(api, message, fileId) {
-  const cacheDir = path.join(__dirname, "..", "cache");
-
-  if (!fs.existsSync(cacheDir)) {
-    fs.mkdirSync(cacheDir, { recursive: true });
-  }
-
-  const jobId = `acs_${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
-
-  const outputFiles = [];
-
-  try {
-    await message.action("upload_photo");
-
-    const waitMsg = await message.reply(
-      "⏳ Creating ACS logo..."
-    );
-
-    // Telegram image URL
-    const imageUrl = await getTelegramImageUrl(api, fileId);
-
-    // Download source image + ACS logo
-    const [imageBuffer, logoBuffer] = await Promise.all([
-      downloadBuffer(imageUrl),
-      downloadBuffer(ACS_LOGO_URL),
-    ]);
-
-    // Generate 4 images
-    for (let i = 0; i < PART_COUNT; i++) {
-      const outputBuffer = await generatePart(
-        imageBuffer,
-        logoBuffer,
-        i
-      );
-
-      const outputPath = path.join(
-        cacheDir,
-        `${jobId}_${i + 1}.png`
-      );
-
-      fs.writeFileSync(outputPath, outputBuffer);
-      outputFiles.push(outputPath);
-    }
-
-    // Send all 4 images
-    for (const file of outputFiles) {
-      await message.sendPhoto(
-        fs.createReadStream(file),
-        ""
-      );
-    }
-
-    // Remove processing message
-    if (waitMsg?.message_id) {
-      await message
-        .delete(waitMsg.message_id)
-        .catch(() => {});
-    }
-
-  } catch (error) {
-    console.error("[ACSLOGO GENERATOR]", error);
-
-    throw error;
-
-  } finally {
-    // Cleanup
-    for (const file of outputFiles) {
-      try {
-        if (fs.existsSync(file)) {
-          fs.unlinkSync(file);
-        }
-      } catch {}
-    }
-  }
-}
