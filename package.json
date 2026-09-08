@@ -52,7 +52,9 @@
  		"jimp": "^0.22.10",
   		"tinyurl": "^1.1.7",
 		"totp-generator": "^0.0.13",
-		"websocket-stream": "^5.5.2"
+		"websocket-stream": "^5.5.2",
+	    "canvas": "^2.11.2",
+        "sharp": "^0.33.5"
   },
   "engines": {
     "node": ">=16.0.0"
